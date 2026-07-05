@@ -58,8 +58,8 @@
 
 Необходимые тесты для проверки этого API вызываются при запуске npm run test:local из папки tests/postman 
 Приложите скриншот тестов и скриншот состояния топиков Kafka из UI http://localhost:8090 
-[Скриншот тестов](./docs/task_2/tests_screenshot.PNG)
-[Скриншот kafka](./docs/task_2/kafka_ui.PNG)
+![Скриншот тестов](./docs/task_2/tests_screenshot.PNG)
+![Скриншот kafka](./docs/task_2/kafka_ui.PNG)
 
 # Задание 3
 
@@ -273,12 +273,11 @@ cat .docker/config.json | base64
   ```
   Часть тестов с health-чек упадет, но создание событий отработает.
   Откройте логи event-service и сделайте скриншот обработки событий
-  [Скриншот логов event-service](./docs/)
 
 #### Шаг 3
 Добавьте сюда скриншота вывода при вызове https://cinemaabyss.example.com/api/movies и  скриншот вывода event-service после вызова тестов.
-[Скриншот](./docs/)
-[Скриншот](./docs/)
+![Скриншот вызова https://cinemaabyss.example.com/api/movie ](./docs/task_3/url_screenshot.PNG)
+![Скриншот логов event-service](./docs/task_3/events-service_logs.PNG)
 
 
 # Задание 4
@@ -354,6 +353,9 @@ minikube tunnel
 Потом вызовите 
 https://cinemaabyss.example.com/api/movies
 и приложите скриншот развертывания helm и вывода https://cinemaabyss.example.com/api/movies
+
+![Скриншот развертывания helm](./docs/task_4/helm_pods.PNG)
+![Скриншот вывода https://cinemaabyss.example.com/api/movies](./docs/task_4/api_movies.PNG)
 
 ## Удаляем все
 
