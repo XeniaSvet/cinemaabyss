@@ -45,30 +45,37 @@ jobs:
 
       - name: Wait for services
         run: |
-          echo "Waiting for services to be ready..."
+          echo "Waiting for services to become available..."
+          
+          URLS=(
+            "http://localhost:8080/health"
+            "http://localhost:8081/api/movies/health"
+            "http://localhost:8082/api/events/health"
+            "http://localhost:8000/health"
+          )
 
-          for url in \
-            http://localhost:8080/health \
-            http://localhost:8081/api/movies/health \
-            http://localhost:8082/api/events/health \
-            http://localhost:8000/health
-          do
-            echo "Checking $url"
+          for url in "${URLS[@]}"; do
+            echo "Checking availability for: $url"
+            success=false
+            
             for i in {1..30}; do
-              if curl -fsS "$url" > /dev/null; then
-                echo "$url is ready"
+              if curl -sSf --connect-timeout 2 "$url" > /dev/null 2>&1; then
+                echo "SUCCESS: $url is ready!"
+                success=true
                 break
               fi
-
-              if [ "$i" -eq 30 ]; then
-                echo "$url is not ready"
-                docker compose ps
-                docker compose logs --tail=120
-                exit 1
-              fi
-
-              sleep 5
+              echo "Attempt $i/30: $url is not ready yet. Retrying in 3 seconds..."
+              sleep 3
             done
+
+            if [ "$success" = false ]; then
+              echo "ERROR: Timeout reached. $url failed to start in time."
+              echo "=== Dynamic Docker Compose Status ==="
+              docker compose ps
+              echo "=== Recent Container Logs ==="
+              docker compose logs --tail=100
+              exit 1
+            fi
           done
 
       - name: Set up Node.js
