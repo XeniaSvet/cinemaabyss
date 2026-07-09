@@ -1,0 +1,72 @@
+@startuml
+title CinemaAbyss Container Diagram
+
+top to bottom direction
+
+!includeurl https://raw.githubusercontent.com/RicardoNiepel/C4-PlantUML/master/C4_Component.puml
+
+Person(user, "User", "Пользователь Кинобездны")
+System(CinemaAbyss, "CinemaAbyss System", "Онлайн-кинотеатр")
+
+Container_Boundary(CinemaAbyss, "CinemaAbyss System") {
+    Container(WebApp, "WebApp", "React / JS", "WebApp")
+    Container(MobileApp, "Mobile App", "iOS / Android", "Mobile App")
+    Container(SmartTV, "TV App", "Smart TV SDK", "Smart TV")
+
+    Container(APIGateway, "API Gateway", "Traefik / Nginx", "Маршрутизация запросов, TLS-терминация, Rate Limiting, валидация JWT")
+    
+    Container(PaymentService, "Payment Service", "Go", "Обработка платежей")
+    Container(UserService, "User Service", "Go", "Управление профилями пользователей, регистрация и сессии")
+    Container(DiscountService, "Discount Service", "Go", "Скидки, система лояльности")
+    Container(SubscriptionService, "Subscription Service", "Go", "Подписки")
+    Container(Metadata, "Metadata", "Go", "Предоставление информации о фильмах, жанрах, актерах и оценках")
+    Container(VideoService, "Video Service", "Go", "Видео")
+    Container(RecommendationService, "Recommendation Service", "Go", "Сервис взаимодействия с системой рекомендаций")
+    
+    SystemDb(UserServiceDB, "User Service DB", "PostgreSQL", "Хранение учетных записей и сессий")
+    SystemDb(MetadataDB, "Metadata DB", "PostgreSQL", "Хранение справочников фильмов, актеров и жанров")
+    SystemDb(SubscriptionDB, "Subscription DB", "PostgreSQL", "Хранение данных о подписках")
+    SystemDb(PaymentDB, "Payment DB", "PostgreSQL", "Хранение данных о платежах")
+    SystemDb(DiscountDB, "Discount DB", "PostgreSQL", "Хранение сданных о скидках")
+    SystemDb(VideoDB, "Video DB", "S3", "Хранение видео")
+    
+    Container(kafka, "Kafka", "Kafka", "Брокер сообщений для асинхронного взаимодействия (топики: movie-events, user-actions)")
+}
+
+System_Ext(bank, "Bank System", "Сторонний банк для обработки платежей")
+System_Ext(Recomendations, "Recomendations System", "Внешняя рекомендательная система")
+
+Rel(user, WebApp, "Использует систему", "HTTPS / REST")
+Rel(user, MobileApp, "Использует систему", "HTTPS / REST")
+Rel(user, SmartTV, "Использует систему", "HTTPS / REST")
+
+Rel(WebApp, APIGateway, "REST API", "HTTPS")
+Rel(MobileApp, APIGateway, "REST API", "HTTPS")
+Rel(SmartTV, APIGateway, "REST API", "HTTPS")
+
+Rel(APIGateway, UserService, "REST", "Запросы профиля пользователя")
+Rel(APIGateway, Metadata, "REST", "Запросы каталога и фильмов")
+Rel(APIGateway, PaymentService, "REST", "Запросы к платежному сервису")
+Rel(APIGateway, SubscriptionService, "REST", "Управление подписками")
+Rel(APIGateway, DiscountService, "REST", "Запросы на получение скидок")
+Rel(APIGateway, VideoService, "REST", "Запросы на получение видео")
+
+Rel(UserService, UserServiceDB, "Пул соединений")
+Rel(Metadata, MetadataDB, "Пул соединений")
+Rel(PaymentService, PaymentDB, "Пул соединений")
+Rel(SubscriptionService, SubscriptionDB, "Пул соединений")
+Rel(DiscountService, DiscountDB, "Пул соединений")
+Rel(VideoService, VideoDB, "Пул соединений")
+
+Rel(kafka, RecommendationService, "Передача данных о рекомендациях")
+Rel(VideoService, kafka, "Публикация события просмотра видео")
+Rel(PaymentService, kafka, "События платежей")
+Rel(SubscriptionService, kafka, "Публикация действий с подписками")
+Rel(UserService, kafka, "Публикация записей о пользователе")
+
+Rel(RecommendationService, Recomendations, "Интеграция с рекомендательной системой")
+Rel(Recomendations, RecommendationService, "Интеграция с рекомендательной системой")
+
+Rel(PaymentService, bank, "Интеграция с банком")
+Rel(bank, PaymentService, "Интеграция с банком")
+@enduml

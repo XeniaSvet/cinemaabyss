@@ -3,83 +3,151 @@ name: Docker Build and Push
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ main, cinema ]
     paths:
       - 'src/**'
+      - 'docker-compose.yml'
+      - 'tests/postman/**'
       - '.github/workflows/docker-build-push.yml'
   release:
     types: [published]
 
 env:
   REGISTRY: ghcr.io
-  MONOLITH_IMAGE_NAME: ${{ github.repository }}/monolith
-  MOVIES_SERVICE_IMAGE_NAME: ${{ github.repository }}/movies-service
-  EVENTS_SERVICE_IMAGE_NAME: ${{ github.repository }}/events-service
-  PROXY_SERVICE_IMAGE_NAME: ${{ github.repository }}/proxy-service
 
 jobs:
-  build-and-push:
+  build-test-and-push:
     runs-on: ubuntu-latest
+
     permissions:
       contents: read
       packages: write
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+
+      - name: Prepare lowercase image prefix
+        id: image-prefix
+        run: |
+          REPOSITORY_LOWER=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+          echo "prefix=${REGISTRY}/${REPOSITORY_LOWER}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
+
+      - name: Start services for API tests
+        run: |
+          docker compose up --build -d
+
+      - name: Wait for services
+        run: |
+          echo "Waiting for services to become available..."
+          
+          URLS=(
+            "http://localhost:8080/health"
+            "http://localhost:8081/api/movies/health"
+            "http://localhost:8082/api/events/health"
+            "http://localhost:8000/health"
+          )
+
+          for url in "${URLS[@]}"; do
+            echo "Checking availability for: $url"
+            success=false
+            
+            for i in {1..30}; do
+              if curl -sSf --connect-timeout 2 "$url" > /dev/null 2>&1; then
+                echo "SUCCESS: $url is ready!"
+                success=true
+                break
+              fi
+              echo "Attempt $i/30: $url is not ready yet. Retrying in 3 seconds..."
+              sleep 3
+            done
+
+            if [ "$success" = false ]; then
+              echo "ERROR: Timeout reached. $url failed to start in time."
+              echo "=== Dynamic Docker Compose Status ==="
+              docker compose ps
+              echo "=== Recent Container Logs ==="
+              docker compose logs --tail=100
+              exit 1
+            fi
+          done
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            tests/postman/package-lock.json
+            tests/postman/package.json
+
+      - name: Install API test dependencies
+        working-directory: tests/postman
+        run: npm ci
+
+      - name: Run API tests
+        working-directory: tests/postman
+        run: npm run test:local
+
+      - name: Show service logs on failure
+        if: failure()
+        run: |
+          docker compose ps
+          docker compose logs --tail=200
+
+      - name: Stop services after tests
+        if: always()
+        run: docker compose down -v
 
       - name: Log in to the Container registry
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels) for Monolith
-        id: meta-monolith
-        uses: docker/metadata-action@v4
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.MONOLITH_IMAGE_NAME }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,format=short
-            type=ref,event=branch
-            latest
-
       - name: Build and push Monolith Docker image
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v5
         with:
           context: ./src/monolith
+          platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta-monolith.outputs.tags }}
-          labels: ${{ steps.meta-monolith.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Extract metadata (tags, labels) for Movies Service
-        id: meta-movies
-        uses: docker/metadata-action@v4
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.MOVIES_SERVICE_IMAGE_NAME }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,format=short
-            type=ref,event=branch
-            latest
+            ${{ steps.image-prefix.outputs.prefix }}/monolith:latest
+            ${{ steps.image-prefix.outputs.prefix }}/monolith:${{ github.sha }}
 
       - name: Build and push Movies Service Docker image
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v5
         with:
           context: ./src/microservices/movies
+          platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta-movies.outputs.tags }}
-          labels: ${{ steps.meta-movies.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: |
+            ${{ steps.image-prefix.outputs.prefix }}/movies-service:latest
+            ${{ steps.image-prefix.outputs.prefix }}/movies-service:${{ github.sha }}
 
-      
+      - name: Build and push Events Service Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./src/microservices/events
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.image-prefix.outputs.prefix }}/events-service:latest
+            ${{ steps.image-prefix.outputs.prefix }}/events-service:${{ github.sha }}
+
+      - name: Build and push Proxy Service Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./src/microservices/proxy
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.image-prefix.outputs.prefix }}/proxy-service:latest
+            ${{ steps.image-prefix.outputs.prefix }}/proxy-service:${{ github.sha }}
