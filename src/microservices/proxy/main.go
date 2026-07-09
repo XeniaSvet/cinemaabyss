@@ -1,7 +1,6 @@
 package main
 
 import (
-	"hash/fnv"
 	"fmt"
 	"log"
 	"math/rand"
@@ -34,6 +33,33 @@ func main() {
 	moviesProxy := httputil.NewSingleHostReverseProxy(config.MoviesServiceURL)
 	eventsProxy := httputil.NewSingleHostReverseProxy(config.EventsServiceURL)
 
+	// Настройка для Monolith
+	origMonolithDir := monolithProxy.Director
+	monolithProxy.Director = func(req *http.Request) {
+		origMonolithDir(req)
+		req.URL.Scheme = config.MonolithURL.Scheme
+		req.URL.Host = config.MonolithURL.Host
+		req.Host = config.MonolithURL.Host
+	}
+
+	// Настройка для Movies
+	origMoviesDir := moviesProxy.Director
+	moviesProxy.Director = func(req *http.Request) {
+		origMoviesDir(req)
+		req.URL.Scheme = config.MoviesServiceURL.Scheme
+		req.URL.Host = config.MoviesServiceURL.Host
+		req.Host = config.MoviesServiceURL.Host
+	}
+
+	// Настройка для Events
+	origEventsDir := eventsProxy.Director
+	eventsProxy.Director = func(req *http.Request) {
+		origEventsDir(req)
+		req.URL.Scheme = config.EventsServiceURL.Scheme
+		req.URL.Host = config.EventsServiceURL.Host
+		req.Host = config.EventsServiceURL.Host
+	}
+
 	// Настраиваем логирование ошибок проксирования
 	setupProxyErrorHandler(monolithProxy, "Monolith")
 	setupProxyErrorHandler(moviesProxy, "Movies-Service")
@@ -44,36 +70,32 @@ func main() {
 		path := r.URL.Path
 
 		// Маршрутизация на сервис событий (Events)
-		if strings.HasPrefix(path, "/api/v1/events") {
-			r.Host = config.EventsServiceURL.Host
+		if strings.HasPrefix(path, "/api/events") {
 			eventsProxy.ServeHTTP(w, r)
 			return
 		}
 
 		// Логика Strangler Fig для сервиса метаданных фильмов (Movies)
-		if strings.HasPrefix(path, "/api/v1/movies") {
+		if strings.HasPrefix(path, "/api/movies") {
 			if config.GradualMigration && shouldRouteToNewService(r, config.MoviesMigrationPercent) {
 				log.Printf("[Strangler] Routing request %s %s to MOVIES-SERVICE", r.Method, path)
-				r.Host = config.MoviesServiceURL.Host
 				moviesProxy.ServeHTTP(w, r)
 				return
 			}
-			
+
 			// Если фиче-флаг выключен или процент не пройден — отдаем монолиту
 			log.Printf("[Strangler] Routing request %s %s to MONOLITH", r.Method, path)
-			r.Host = config.MonolithURL.Host
 			monolithProxy.ServeHTTP(w, r)
 			return
 		}
 
 		// Все остальные эндпоинты по умолчанию уходят на Монолит
-		r.Host = config.MonolithURL.Host
 		monolithProxy.ServeHTTP(w, r)
 	})
 
 	log.Printf("Proxy Gateway started on port %s", config.Port)
 	log.Printf("Migration flag Status: %t, Target Percent: %d%%", config.GradualMigration, config.MoviesMigrationPercent)
-	if err := http.ListenAndServe(":" + config.Port, nil); err != nil {
+	if err := http.ListenAndServe(":"+config.Port, nil); err != nil {
 		log.Fatalf("Failed to start proxy server: %v", err)
 	}
 }
@@ -87,27 +109,7 @@ func shouldRouteToNewService(r *http.Request, percent int) bool {
 		return true
 	}
 
-	// Ищем идентификатор пользователя для обеспечения липкости (Sticky Sessions)
-	// Пытаемся достать из кастомного заголовка или Cookie
-	userID := r.Header.Get("X-User-ID")
-	if userID == "" {
-		if cookie, err := r.Cookie("user_id"); err == nil {
-			userID = cookie.Value
-		}
-	}
-
-	// Если пользователь не авторизован, привязываемся к IP-адресу, чтобы избежать мерцания UI
-	if userID == "" {
-		userID = r.RemoteAddr
-	}
-
-	// Хешируем строку для получения стабильного распределения от 0 до 99
-	hasher := fnv.New32a()
-	hasher.Write([]byte(userID))
-	hashValue := hasher.Sum32()
-	userBucket := int(hashValue % 100)
-
-	return userBucket < percent
+	return rand.Intn(100) < percent
 }
 
 func setupProxyErrorHandler(proxy *httputil.ReverseProxy, serviceName string) {

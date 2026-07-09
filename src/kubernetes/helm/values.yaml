@@ -173,13 +173,9 @@ ingress:
           pathType: Prefix
           service: proxy-service
           port: 80
-        - path: /api/events
-          pathType: Prefix
-          service: events-service
-          port: 8082
 
 # Application configuration
 config:
   # Strangler Fig configuration
   gradualMigration: "true"
-  moviesMigrationPercent: "100"
+  moviesMigrationPercent: "50"
